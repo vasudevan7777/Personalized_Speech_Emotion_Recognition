@@ -1,0 +1,28 @@
+# Speech Emotion Recognition - Dependencies
+# ==========================================
+
+# Core
+streamlit>=1.28.0
+numpy<2.0
+pandas>=2.0.0
+
+# Audio Processing
+librosa>=0.10.0
+soundfile>=0.12.0
+sounddevice>=0.4.6
+
+# Machine Learning
+scikit-learn>=1.3.0
+joblib>=1.3.0
+
+# Visualization
+plotly>=5.18.0
+seaborn>=0.13.0
+matplotlib>=3.8.0
+
+# Utilities
+colorama>=0.4.6
+
+# Optional: For live recording in browser
+# streamlit-webrtc>=0.47.0
+# av>=10.0.0

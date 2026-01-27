@@ -1,0 +1,32 @@
+# Virtual Environment
+venv/
+env/
+.env/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Models (optional - uncomment if you don't want to upload)
+# models/
+
+# Dataset (too large for GitHub)
+dataset/
+
+# Temporary files
+*.log
+*.tmp
+live.wav
