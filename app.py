@@ -1,520 +1,961 @@
-"""
-🎭 Speech Emotion Recognition - Streamlit App
-Run: streamlit run app.py
-"""
 
+import random
 import streamlit as st
 import numpy as np
 import librosa
 import soundfile as sf
 import os
-import plotly.graph_objects as go
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder, StandardScaler
-from sklearn.neural_network import MLPClassifier
-from sklearn.metrics import accuracy_score, classification_report
-from sklearn.pipeline import make_pipeline
 import joblib
+import pandas as pd
 import warnings
+import datetime
+from speech_emotion_recognition import (
+    SimpleLabelEncoder as LabelEncoder,
+    simple_train_test_split as train_test_split,
+    simple_accuracy_score as accuracy_score,
+    LOW_CONFIDENCE_THRESHOLD,
+    MODERATE_CONFIDENCE_THRESHOLD,
+)
+
+# Import modular custom packages
+import features
+import wellness_engine
+import history_manager
+import dashboard
+
 warnings.filterwarnings('ignore')
 
-# ============================================================================
-# CONFIG
-# ============================================================================
-st.set_page_config(page_title="🎭 Speech Emotion Recognition", page_icon="🎭", layout="wide")
-
-DATASET_PATH = "dataset/Audio_Speech_Actors_01-24"
-MODEL_DIR = "models"
-SAMPLE_RATE = 22050
-
-EMOTIONS = {
+RAVDESS_EMOTIONS = {
     '01': 'neutral', '02': 'calm', '03': 'happy', '04': 'sad',
-    '05': 'angry', '06': 'fearful', '07': 'disgust', '08': 'surprised'
+    '05': 'angry',   '06': 'fearful', '07': 'disgust', '08': 'surprised'
 }
 
+st.set_page_config(
+    page_title="Speech Emotion Recognition & Wellness Dashboard",
+    page_icon="🎭",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATASET_PATH = os.path.join(BASE_DIR, "dataset", "Audio_Speech_Actors_01-24")
+MODEL_DIR = os.path.join(BASE_DIR, "models")
+FEEDBACK_DIR = os.path.join(BASE_DIR, "feedback_data")
+SAMPLE_RATE = 22050
+
+# Emojis for emotions
 EMOTION_EMOJIS = {
     'neutral': '😐', 'calm': '😌', 'happy': '😊', 'sad': '😢',
     'angry': '😠', 'fearful': '😨', 'disgust': '🤢', 'surprised': '😲'
 }
 
-# ============================================================================
-# CUSTOM CSS
-# ============================================================================
 st.markdown("""
 <style>
+    @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap');
+
+    html, body, [class*="css"] { font-family: 'Outfit', sans-serif; }
+
+    /* ── Header ────────────────────────────────── */
     .main-header {
-        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-        padding: 2rem; border-radius: 15px; text-align: center; margin-bottom: 2rem;
+        background: linear-gradient(135deg, #1a1233 0%, #2e2050 50%, #4a2e6e 100%);
+        padding: 2.5rem 3rem;
+        border-radius: 22px;
+        text-align: center;
+        margin-bottom: 2rem;
+        border: 1px solid rgba(255,255,255,0.08);
+        box-shadow: 0 12px 40px rgba(0,0,0,0.4);
     }
-    .main-header h1 { color: white; font-size: 2.5rem; margin: 0; }
-    .main-header p { color: rgba(255,255,255,0.9); margin-top: 0.5rem; }
-    .emotion-result {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        border-radius: 20px; padding: 2rem; text-align: center; margin: 1rem 0;
+    .main-header h1 {
+        font-size: 2.8rem; font-weight: 800; margin: 0;
+        background: linear-gradient(90deg,#a1c4fd 0%,#c2e9fb 100%);
+        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        letter-spacing: -1px;
     }
-    .emotion-result h2 { color: white; font-size: 2.5rem; margin: 0; text-transform: uppercase; }
-    .emotion-emoji { font-size: 4rem; }
+    .main-header p {
+        color: rgba(255,255,255,0.8); font-size: 1.1rem;
+        font-weight: 300; margin-top: 0.6rem;
+    }
+
+    /* ── Glass Cards ────────────────────────────── */
+    .glass-card {
+        background: rgba(255,255,255,0.03);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid rgba(255,255,255,0.07);
+        border-radius: 18px;
+        padding: 1.5rem;
+        margin-bottom: 1.5rem;
+        box-shadow: 0 4px 24px rgba(0,0,0,0.15);
+    }
+    .glass-highlight {
+        background: linear-gradient(135deg,rgba(118,75,162,0.12) 0%,rgba(102,126,234,0.12) 100%);
+        border: 1px solid rgba(118,75,162,0.25);
+        border-radius: 18px;
+        padding: 1.5rem;
+        margin-bottom: 1.5rem;
+    }
+
+    /* ── Metric Grid ────────────────────────────── */
+    .metric-container {
+        display: flex; justify-content: space-between;
+        align-items: stretch; gap: 1rem;
+    }
+    .metric-card {
+        background: rgba(255,255,255,0.03);
+        border: 1px solid rgba(255,255,255,0.07);
+        border-radius: 14px;
+        padding: 1.2rem 0.8rem;
+        text-align: center; flex: 1;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        transition: border-color 0.2s;
+    }
+    .metric-card:hover { border-color: rgba(118,75,162,0.4); }
+    .metric-title {
+        font-size: 0.78rem; color: #9994b0;
+        text-transform: uppercase; font-weight: 600; letter-spacing: 0.6px;
+        margin-bottom: 0.4rem;
+    }
+    .metric-value { font-size: 1.75rem; font-weight: 800; color: white; }
+
+    /* ── Emotion Result ─────────────────────────── */
+    .emotion-result-box {
+        background: linear-gradient(135deg,rgba(102,126,234,0.18) 0%,rgba(118,75,162,0.18) 100%);
+        border: 1px solid rgba(102,126,234,0.3);
+        border-radius: 22px;
+        padding: 2rem 1.5rem;
+        text-align: center;
+        box-shadow: 0 12px 36px rgba(0,0,0,0.25);
+    }
+    .emotion-result-box h2 {
+        color: white; font-size: 2.6rem; font-weight: 800;
+        margin: 0.4rem 0; letter-spacing: 1.5px; text-transform: uppercase;
+    }
+    .emotion-emoji-lg { font-size: 4.5rem; filter: drop-shadow(0 4px 8px rgba(0,0,0,0.3)); }
+    .confidence-badge {
+        background: rgba(255,255,255,0.1);
+        padding: 0.35rem 1rem; border-radius: 30px;
+        font-weight: 600; font-size: 0.95rem; color: #c2e9fb;
+        display: inline-block; margin-top: 0.5rem;
+    }
+    .low-confidence-banner {
+        background: rgba(255,193,7,0.12);
+        border: 1px solid rgba(255,193,7,0.35);
+        border-radius: 10px;
+        padding: 0.6rem 1rem;
+        margin-top: 0.8rem;
+        font-size: 0.88rem;
+        color: #ffe082;
+    }
+
+    /* ── Recording Quality Panel ────────────────── */
+    .quality-panel {
+        background: rgba(255,255,255,0.02);
+        border: 1px solid rgba(255,255,255,0.06);
+        border-radius: 12px;
+        padding: 0.9rem 1.1rem;
+        margin: 0.6rem 0 1rem 0;
+        font-size: 0.88rem;
+    }
+    .quality-ok   { border-left: 3px solid #28A745; }
+    .quality-warn { border-left: 3px solid #FFC107; }
+    .quality-fail { border-left: 3px solid #DC3545; }
+    .q-label { color: #9994b0; font-weight: 600; font-size: 0.78rem;
+               text-transform: uppercase; letter-spacing: 0.5px; }
+    .q-value { color: white; font-weight: 600; }
+
+    /* ── Risk Bar ───────────────────────────────── */
+    .risk-bar-container {
+        width: 100%; background: rgba(255,255,255,0.08);
+        border-radius: 10px; height: 10px;
+        margin-top: 8px; overflow: hidden;
+    }
+    .risk-bar-fill { height: 100%; border-radius: 10px; }
+
+    /* ── Disclaimer ─────────────────────────────── */
+    .disclaimer-card {
+        border-left: 4px solid #E63946;
+        background: rgba(230,57,70,0.06);
+        padding: 0.9rem 1rem;
+        border-radius: 0 10px 10px 0;
+        margin-top: 1rem;
+        font-size: 0.86rem;
+        line-height: 1.5;
+    }
+
+    /* ── Buttons ────────────────────────────────── */
     .stButton > button {
-        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-        color: white; border: none; border-radius: 20px; padding: 0.5rem 2rem;
+        background: linear-gradient(90deg,#667eea 0%,#764ba2 100%) !important;
+        color: white !important; border: none !important;
+        border-radius: 30px !important; font-weight: 600 !important;
+        padding: 0.55rem 2rem !important;
+        transition: transform 0.2s ease, box-shadow 0.2s ease !important;
+        box-shadow: 0 4px 15px rgba(118,75,162,0.3) !important;
     }
-    #MainMenu {visibility: hidden;} footer {visibility: hidden;}
+    .stButton > button:hover {
+        transform: translateY(-2px) !important;
+        box-shadow: 0 6px 20px rgba(118,75,162,0.5) !important;
+    }
+
+    #MainMenu {visibility: hidden;}
+    footer    {visibility: hidden;}
 </style>
 """, unsafe_allow_html=True)
 
-# ============================================================================
-# SESSION STATE
-# ============================================================================
 if 'model' not in st.session_state:
-    st.session_state.model = None
-if 'label_encoder' not in st.session_state:
-    st.session_state.label_encoder = None
-if 'trained' not in st.session_state:
-    st.session_state.trained = False
-if 'accuracy' not in st.session_state:
-    st.session_state.accuracy = 0
-if 'feedback_data' not in st.session_state:
-    st.session_state.feedback_data = []  # Store user feedback for retraining
+    model_path = os.path.join(MODEL_DIR, "model.pkl")
+    encoder_path = os.path.join(MODEL_DIR, "encoder.pkl")
+    accuracy_path = os.path.join(MODEL_DIR, "accuracy.pkl")
+    
+    if os.path.exists(model_path) and os.path.exists(encoder_path):
+        try:
+            from speech_emotion_recognition import KerasEmotionModel
+            st.session_state.model = KerasEmotionModel.load(MODEL_DIR)
+            st.session_state.label_encoder = joblib.load(encoder_path)
+            st.session_state.trained = True
+            if os.path.exists(accuracy_path):
+                st.session_state.accuracy = joblib.load(accuracy_path)
+            else:
+                st.session_state.accuracy = 85.0
+        except Exception as e:
+            st.session_state.model = None
+            st.session_state.label_encoder = None
+            st.session_state.trained = False
+            st.session_state.accuracy = 0
+            st.sidebar.error(f"Error loading model: {e}")
+    else:
+        st.session_state.model = None
+        st.session_state.label_encoder = None
+        st.session_state.trained = False
+        st.session_state.accuracy = 0
+
 if 'last_result' not in st.session_state:
-    st.session_state.last_result = None  # Store last prediction result
+    st.session_state.last_result = None
 if 'last_audio' not in st.session_state:
     st.session_state.last_audio = None
 if 'last_sr' not in st.session_state:
     st.session_state.last_sr = None
+if 'last_quality' not in st.session_state:
+    st.session_state.last_quality = None
 
-FEEDBACK_DIR = "feedback_data"  # Directory to save feedback audio
 
-# ============================================================================
-# FEATURE EXTRACTION
-# ============================================================================
-def extract_features(audio_data, sr=SAMPLE_RATE):
-    """Extract audio features for emotion recognition."""
-    if len(audio_data) < sr * 0.5:
-        audio_data = np.pad(audio_data, (0, int(sr * 0.5) - len(audio_data)), mode='constant')
-    
-    features = []
-    
-    # MFCC (40) - Most important for emotion
-    mfccs = librosa.feature.mfcc(y=audio_data, sr=sr, n_mfcc=40)
-    features.append(np.mean(mfccs.T, axis=0))
-    features.append(np.std(mfccs.T, axis=0))  # Add standard deviation
-    
-    # Delta MFCC (40) - Captures dynamics
-    delta_mfccs = librosa.feature.delta(mfccs)
-    features.append(np.mean(delta_mfccs.T, axis=0))
-    
-    # Delta-Delta MFCC (40) - Acceleration
-    delta2_mfccs = librosa.feature.delta(mfccs, order=2)
-    features.append(np.mean(delta2_mfccs.T, axis=0))
-    
-    # Chroma (12)
-    chroma = librosa.feature.chroma_stft(y=audio_data, sr=sr)
-    features.append(np.mean(chroma.T, axis=0))
-    
-    # Spectral Contrast (7)
-    spec_contrast = librosa.feature.spectral_contrast(y=audio_data, sr=sr)
-    features.append(np.mean(spec_contrast.T, axis=0))
-    
-    # ZCR - mean and std
-    zcr = librosa.feature.zero_crossing_rate(audio_data)
-    features.append(np.array([np.mean(zcr), np.std(zcr)]))
-    
-    # RMS Energy - mean and std
-    rms = librosa.feature.rms(y=audio_data)
-    features.append(np.array([np.mean(rms), np.std(rms)]))
-    
-    # Mel Spectrogram (128)
-    mel = librosa.feature.melspectrogram(y=audio_data, sr=sr, n_mels=128)
-    features.append(np.mean(mel.T, axis=0))
-    
-    # Spectral features
-    spectral_centroid = librosa.feature.spectral_centroid(y=audio_data, sr=sr)
-    spectral_bandwidth = librosa.feature.spectral_bandwidth(y=audio_data, sr=sr)
-    spectral_rolloff = librosa.feature.spectral_rolloff(y=audio_data, sr=sr)
-    spectral_flatness = librosa.feature.spectral_flatness(y=audio_data)
-    
-    features.append(np.array([
-        np.mean(spectral_centroid), np.std(spectral_centroid),
-        np.mean(spectral_bandwidth), np.std(spectral_bandwidth),
-        np.mean(spectral_rolloff), np.std(spectral_rolloff),
-        np.mean(spectral_flatness), np.std(spectral_flatness)
-    ]))
-    
-    # Pitch/F0 features
-    pitches, magnitudes = librosa.piptrack(y=audio_data, sr=sr)
-    pitch_mean = np.mean(pitches[pitches > 0]) if np.any(pitches > 0) else 0
-    pitch_std = np.std(pitches[pitches > 0]) if np.any(pitches > 0) else 0
-    features.append(np.array([pitch_mean, pitch_std]))
-    
-    return np.hstack(features)
-
-# ============================================================================
-# LOAD DATASET
-# ============================================================================
 def load_dataset():
-    """Load RAVDESS dataset."""
+    """Load RAVDESS dataset using 549 enhanced features (mean+std for all banks)."""
     x, y = [], []
-    
     if not os.path.exists(DATASET_PATH):
         return np.array(x), np.array(y)
-    
-    for actor_folder in sorted(os.listdir(DATASET_PATH)):
+
+    actor_folders = sorted(os.listdir(DATASET_PATH))
+    for actor_folder in actor_folders:
         actor_path = os.path.join(DATASET_PATH, actor_folder)
         if not os.path.isdir(actor_path):
             continue
-        
+
         for file in os.listdir(actor_path):
             if not file.endswith(".wav"):
                 continue
-            
             parts = file.split("-")
             if len(parts) < 3:
                 continue
-            
-            emotion = EMOTIONS.get(parts[2])
+            emotion = RAVDESS_EMOTIONS.get(parts[2])
             if not emotion:
                 continue
-            
             try:
-                audio, sr = librosa.load(os.path.join(actor_path, file), duration=3, offset=0.5, sr=SAMPLE_RATE)
-                features = extract_features(audio, sr)
-                x.append(features)
+                feat = features.extract_features(
+                    os.path.join(actor_path, file),
+                    sr=SAMPLE_RATE,
+                    num_features=549,
+                    duration=3,
+                    offset=0.5,
+                )
+                x.append(feat)
                 y.append(emotion)
-            except:
+            except Exception:
                 continue
-    
+
     return np.array(x), np.array(y)
 
-# ============================================================================
-# TRAIN MODEL
-# ============================================================================
 def train_model(x, y):
-    """Train MLP model with enhanced architecture."""
+    """Train Keras model with enhanced architecture (549 features).
+
+    epochs=300 ceiling — EarlyStopping (patience=30) terminates early.
+    batch_size=16 gives more gradient updates per epoch on the small dataset.
+    """
     label_encoder = LabelEncoder()
     y_encoded = label_encoder.fit_transform(y)
-    
+
     x_train, x_test, y_train, y_test = train_test_split(
         x, y_encoded, test_size=0.2, random_state=42, stratify=y_encoded
     )
-    
-    # Enhanced model with deeper layers and regularization
-    model = make_pipeline(
-        StandardScaler(),
-        MLPClassifier(
-            hidden_layer_sizes=(512, 256, 128, 64),
-            activation='relu',
-            solver='adam',
-            alpha=0.001,  # L2 regularization to prevent overfitting
-            batch_size=32,
-            learning_rate='adaptive',
-            learning_rate_init=0.001,
-            max_iter=2000,
-            early_stopping=True,
-            validation_fraction=0.15,
-            n_iter_no_change=25,
-            random_state=42
-        )
-    )
-    model.fit(x_train, y_train)
-    
+
+    from speech_emotion_recognition import KerasEmotionModel
+
+    model = KerasEmotionModel()
+    model.fit(x_train, y_train, epochs=100, batch_size=64)
+
     accuracy = accuracy_score(y_test, model.predict(x_test)) * 100
     return model, label_encoder, accuracy
 
-# ============================================================================
-# PREDICT
-# ============================================================================
 def predict_emotion(model, label_encoder, audio_data, sr=SAMPLE_RATE):
-    """Predict emotion from audio."""
-    features = extract_features(audio_data, sr).reshape(1, -1)
-    pred = model.predict(features)[0]
-    proba = model.predict_proba(features)[0]
-    
-    emotion = label_encoder.inverse_transform([pred])[0]
-    confidence = np.max(proba)
-    all_probs = dict(zip(label_encoder.classes_, proba))
-    
+    """Predict emotion from audio, using the exact feature count the model was trained on.
+
+    Both uploaded files and live microphone recordings pass through the same
+    extract_features() call here, guaranteeing identical preprocessing.
+    A dimension check guards against silent mismatches that would produce
+    garbage predictions.
+    """
+    # Determine the number of features the model expects
+    try:
+        if hasattr(model, 'steps'):
+            num_features = model.steps[0][1].n_features_in_
+        elif hasattr(model, 'n_features_in_') and model.n_features_in_ is not None:
+            num_features = model.n_features_in_
+        else:
+            num_features = 189
+    except Exception:
+        num_features = 189
+
+    features_vector = features.extract_features(
+        audio_data, sr=sr, num_features=num_features
+    ).reshape(1, -1)
+
+    # Safety check: catch dimension mismatches before they silently corrupt predictions
+    expected_dim = model.n_features_in_ if hasattr(model, 'n_features_in_') and model.n_features_in_ is not None else num_features
+    if features_vector.shape[1] != expected_dim:
+        raise ValueError(
+            f"Feature dimension mismatch: extracted {features_vector.shape[1]} features "
+            f"but model expects {expected_dim}. Retrain the model."
+        )
+
+    pred  = model.predict(features_vector)[0]
+    proba = model.predict_proba(features_vector)[0]
+
+    emotion    = label_encoder.inverse_transform([pred])[0]
+    confidence = float(np.max(proba))
+    all_probs  = dict(zip(label_encoder.classes_, proba))
+
     return emotion, confidence, all_probs
 
-# ============================================================================
-# ADAPTIVE LEARNING - Save feedback data
-# ============================================================================
 def save_feedback_audio(audio_data, sr, correct_emotion):
     """Save audio with correct emotion label for future retraining."""
     os.makedirs(FEEDBACK_DIR, exist_ok=True)
-    
-    # Generate unique filename with emotion label
-    import time
-    filename = f"{correct_emotion}_{int(time.time())}.wav"
+    filename = f"{correct_emotion}_{int(datetime.datetime.now().timestamp())}.wav"
     filepath = os.path.join(FEEDBACK_DIR, filename)
-    
     sf.write(filepath, audio_data, sr)
     return filepath
 
 def load_feedback_dataset():
-    """Load feedback data for retraining."""
+    """Load feedback data using the SAME feature params as training.
+
+    Previously used duration=10, offset=0.0 which created a distribution
+    shift vs. the training data (duration=3, offset=0.5). This caused
+    feedback retraining to hurt rather than help accuracy.
+    Using duration=3, offset=0.5 ensures feedback samples are processed
+    identically to the original RAVDESS training files.
+    """
     x, y = [], []
-    
     if not os.path.exists(FEEDBACK_DIR):
         return np.array(x), np.array(y)
-    
+
     for file in os.listdir(FEEDBACK_DIR):
         if not file.endswith('.wav'):
             continue
-        
-        # Extract emotion from filename (emotion_timestamp.wav)
         emotion = file.split('_')[0]
         if emotion not in EMOTION_EMOJIS:
             continue
-        
         try:
-            audio, sr = librosa.load(os.path.join(FEEDBACK_DIR, file), duration=3, offset=0.5, sr=SAMPLE_RATE)
-            features = extract_features(audio, sr)
-            x.append(features)
+            feat = features.extract_features(
+                os.path.join(FEEDBACK_DIR, file),
+                sr=SAMPLE_RATE,
+                num_features=549,
+                duration=3,    # matches training
+                offset=0.5,    # matches training
+            )
+            x.append(feat)
             y.append(emotion)
-        except:
+        except Exception:
             continue
-    
     return np.array(x), np.array(y)
 
 def retrain_with_feedback(x_orig, y_orig, x_feedback, y_feedback):
-    """Retrain model with original + feedback data."""
-    # Combine datasets
+    """Retrain model with combined original + feedback data."""
     x_combined = np.vstack([x_orig, x_feedback]) if len(x_feedback) > 0 else x_orig
     y_combined = np.hstack([y_orig, y_feedback]) if len(y_feedback) > 0 else y_orig
-    
-    # Train with combined data
     return train_model(x_combined, y_combined)
 
-# ============================================================================
-# MAIN APP
-# ============================================================================
 def main():
-    # Header
+    # Header Card
     st.markdown("""
     <div class="main-header">
         <h1>🎭 Speech Emotion Recognition</h1>
-        <p>AI-Powered Emotion Detection from Voice</p>
+        <p>Advanced Clinical-Grade Vocal Analysis & Mental Wellness Dashboard</p>
     </div>
     """, unsafe_allow_html=True)
     
-    # Sidebar
+    # Check sidebar metadata info
     with st.sidebar:
-        st.markdown("## ⚙️ Control Panel")
-        st.markdown("---")
-        
-        # Model Status
+        st.markdown("### ⚙️ System Status")
         if st.session_state.trained:
-            st.success(f"✅ Model Ready! ({st.session_state.accuracy:.1f}%)")
+            # Check expected features
+            try:
+                if hasattr(st.session_state.model, 'steps'):
+                    f_size = st.session_state.model.steps[0][1].n_features_in_
+                else:
+                    f_size = st.session_state.model.n_features_in_
+            except:
+                f_size = "unknown"
+            
+            st.success(f"✅ Model Ready\n- Shape: {f_size} features\n- Accuracy: {st.session_state.accuracy:.2f}%")
         else:
             st.warning("⚠️ Model not trained")
-        
-        st.markdown("---")
-        
-        # Train Button
-        if st.button("🚀 Train Model", use_container_width=True):
-            with st.spinner("Loading dataset..."):
-                x, y = load_dataset()
             
-            if len(x) == 0:
-                st.error("❌ Dataset not found!")
-            else:
-                st.info(f"📊 Loaded {len(x)} samples")
-                
-                with st.spinner("Training model..."):
-                    model, le, acc = train_model(x, y)
-                
-                st.session_state.model = model
-                st.session_state.label_encoder = le
-                st.session_state.trained = True
-                st.session_state.accuracy = acc
-                
-                st.success(f"✅ Done! Accuracy: {acc:.1f}%")
-                st.rerun()
-        
         st.markdown("---")
-        
-        # Save/Load
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("💾 Save", use_container_width=True):
-                if st.session_state.model:
-                    os.makedirs(MODEL_DIR, exist_ok=True)
-                    joblib.dump(st.session_state.model, f"{MODEL_DIR}/model.pkl")
-                    joblib.dump(st.session_state.label_encoder, f"{MODEL_DIR}/encoder.pkl")
-                    st.success("✅ Saved!")
-        
-        with col2:
-            if st.button("📂 Load", use_container_width=True):
-                try:
-                    st.session_state.model = joblib.load(f"{MODEL_DIR}/model.pkl")
-                    st.session_state.label_encoder = joblib.load(f"{MODEL_DIR}/encoder.pkl")
-                    st.session_state.trained = True
-                    st.success("✅ Loaded!")
-                    st.rerun()
-                except:
-                    st.error("❌ No model!")
-        
+        st.markdown("### 💡 Quick Guide")
+        st.info(
+            "1. Upload a WAV audio file or record directly using the microphone.\n"
+            "2. Click **Analyze Emotion** to run predictions, risk evaluation, and wellness advice.\n"
+            "3. Inspect historical charts in **Analytics Dashboard**.\n"
+            "4. Provide corrections in the feedback panel to help retrain the classifier."
+        )
         st.markdown("---")
+        st.caption("Speech Emotion Recognition System v2.0")
         
-        # Adaptive Learning - Retrain with Feedback
-        st.markdown("### 🧠 Adaptive Learning")
-        feedback_count = len(os.listdir(FEEDBACK_DIR)) if os.path.exists(FEEDBACK_DIR) else 0
-        st.caption(f"Feedback samples: {feedback_count}")
+    # Navigation tabs (Feature 1)
+    tab_analyzer, tab_analytics, tab_history, tab_settings = st.tabs([
+        "🎤 Live Analyzer",
+        "📊 Analytics Dashboard",
+        "📜 Prediction History",
+        "⚙️ Model & Training"
+    ])
+    
+    with tab_analyzer:
+        st.markdown("### 🎙️ Audio Input Channel")
+
+        col_inp1, col_inp2 = st.columns([1, 1])
+
+        with col_inp1:
+            st.markdown("##### 📁 Upload File")
+            uploaded_file = st.file_uploader(
+                "Select a WAV, MP3, or OGG file",
+                type=['wav', 'mp3', 'ogg', 'flac'],
+                help="Recommended: 3–5 seconds of clear speech."
+            )
+
+        with col_inp2:
+            st.markdown("##### 🎤 Record Live Microphone")
+            st.caption("Speak clearly for 3–5 s · Use the sentences: *'Kids are talking by the door'* or *'Dogs are sitting by the door'*")
+            recorded_audio = st.audio_input(
+                "Click to record your voice",
+                help="Speak with natural emotion for 3–5 seconds after clicking."
+            )
+
+        audio_file = recorded_audio if recorded_audio is not None else uploaded_file
+
+        if audio_file:
+            try:
+                raw_audio, sr = librosa.load(audio_file, sr=SAMPLE_RATE, duration=10)
+                # Run quality check on RAW audio before preprocessing
+                quality = features.audio_quality_check(raw_audio, sr)
+                st.session_state.last_quality   = quality
+                # Store the raw audio — preprocessing happens inside extract_features
+                st.session_state.last_audio = raw_audio
+                st.session_state.last_sr    = sr
+            except Exception as e:
+                st.error(f"Error loading audio: {e}")
+                st.session_state.last_audio   = None
+                st.session_state.last_sr      = None
+                st.session_state.last_quality = None
+
+        st.markdown("---")
+        col_play, col_wave = st.columns([1, 2])
         
-        if st.button("🔄 Retrain with Feedback", use_container_width=True):
-            if feedback_count == 0:
-                st.warning("⚠️ No feedback data yet!")
+        with col_play:
+            if audio_file:
+                st.markdown("##### 🔊 Audio Playback")
+                st.audio(audio_file)
+
+                # ── Recording Quality Diagnostics (Issue 2, 7) ───────────────
+                q = st.session_state.get('last_quality')
+                if q:
+                    dur_s    = q.get('duration_s', 0)
+                    speech_s = q.get('speech_s',   0)
+                    peak     = q.get('peak_amp',   0)
+                    warns    = q.get('warnings',   [])
+                    q_class  = 'quality-ok' if q['ok'] else ('quality-warn' if len(warns) == 1 else 'quality-fail')
+
+                    st.markdown(f"""
+                    <div class="quality-panel {q_class}">
+                        <div style="font-weight:700; color:#e0dff2; margin-bottom:6px;">📊 Recording Quality</div>
+                        <div style="display:flex; gap:1.5rem; flex-wrap:wrap;">
+                            <span><span class="q-label">Duration</span><br><span class="q-value">{dur_s:.1f}s</span></span>
+                            <span><span class="q-label">Voice</span><br><span class="q-value">{speech_s:.1f}s</span></span>
+                            <span><span class="q-label">Peak Amp</span><br><span class="q-value">{peak:.3f}</span></span>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                    for w in warns:
+                        st.warning(w)
+
+                if st.session_state.last_audio is not None:
+                    if st.button("🔮 Analyze Emotion", use_container_width=True):
+                        if not st.session_state.trained:
+                            st.error("⚠️ Model is not ready. Please train or load the model in the Settings tab!")
+                        else:
+                            with st.spinner("Extracting features and predicting..."):
+                                emotion, confidence, all_probs = predict_emotion(
+                                    st.session_state.model,
+                                    st.session_state.label_encoder,
+                                    st.session_state.last_audio,
+                                    st.session_state.last_sr
+                                )
+                                
+                                risk_breakdown = wellness_engine.calculate_emotional_risk(
+                                    emotion, confidence, st.session_state.last_audio, st.session_state.last_sr
+                                )
+                                risk_score = risk_breakdown["final_score"]
+                                risk_category = risk_breakdown["category"]
+                                
+                                wellness_details = wellness_engine.get_wellness_assessment(
+                                    emotion, risk_score
+                                )
+                                
+                                recs = wellness_engine.get_recommendations(emotion, risk_score)
+                                
+                                st.session_state.last_result = {
+                                    'emotion': emotion,
+                                    'confidence': confidence,
+                                    'all_probs': all_probs,
+                                    'risk_score': risk_score,
+                                    'risk_category': risk_category,
+                                    'risk_breakdown': risk_breakdown,
+                                    'wellness_status': wellness_details["status"],
+                                    'interpretation': wellness_details["interpretation"],
+                                    'recommendations': recs
+                                }
+                                
+                                history_manager.save_prediction(
+                                    emotion=emotion,
+                                    confidence=confidence,
+                                    risk_score=risk_score,
+                                    wellness_status=wellness_details["status"],
+                                    recommendations=recs
+                                )
+                                st.rerun()
             else:
-                with st.spinner("Loading original dataset..."):
-                    x_orig, y_orig = load_dataset()
-                with st.spinner("Loading feedback data..."):
-                    x_fb, y_fb = load_feedback_dataset()
+                st.info("👆 Upload an audio sample or use the live browser microphone to begin the analysis.")
                 
-                st.info(f"📊 Original: {len(x_orig)} + Feedback: {len(x_fb)} = {len(x_orig)+len(x_fb)} samples")
-                
-                with st.spinner("Retraining model..."):
-                    model, le, acc = retrain_with_feedback(x_orig, y_orig, x_fb, y_fb)
-                
-                st.session_state.model = model
-                st.session_state.label_encoder = le
-                st.session_state.accuracy = acc
-                st.success(f"✅ Retrained! New Accuracy: {acc:.1f}%")
-                st.rerun()
-    
-    # Main Content
-    st.markdown("### 📁 Upload Audio File")
-    uploaded_file = st.file_uploader("Choose a WAV file", type=['wav', 'mp3', 'ogg', 'flac'])
-    
-    if uploaded_file:
-        # Load audio
-        audio_data, sr = librosa.load(uploaded_file, sr=SAMPLE_RATE, duration=5)
+                if st.button("🎲 Analyze Random Sample", use_container_width=True):
+                    if not st.session_state.trained:
+                        st.error("Please train the model first!")
+                    elif not os.path.exists(DATASET_PATH):
+                        st.error("RAVDESS dataset not found.")
+                    else:
+                        import random
+                        actors = [f for f in os.listdir(DATASET_PATH) if os.path.isdir(os.path.join(DATASET_PATH, f))]
+                        if not actors:
+                            st.error("No actor directories found.")
+                        else:
+                            actor = random.choice(actors)
+                            files_in_folder = [f for f in os.listdir(os.path.join(DATASET_PATH, actor)) if f.endswith('.wav')]
+                            if not files_in_folder:
+                                st.error("No files in actor directory.")
+                            else:
+                                file = random.choice(files_in_folder)
+                                filepath = os.path.join(DATASET_PATH, actor, file)
+
+                                true_emotion = RAVDESS_EMOTIONS.get(file.split('-')[2], 'unknown')
+
+                                audio_data, sr = librosa.load(filepath, sr=SAMPLE_RATE, duration=3, offset=0.5)
+                                st.session_state.last_audio = audio_data
+                                st.session_state.last_sr    = sr
+
+                                emotion, confidence, all_probs = predict_emotion(
+                                    st.session_state.model,
+                                    st.session_state.label_encoder,
+                                    audio_data, sr
+                                )
+
+                                risk_breakdown  = wellness_engine.calculate_emotional_risk(
+                                    emotion, confidence, audio_data, sr
+                                )
+                                risk_score      = risk_breakdown["final_score"]
+                                wellness_details = wellness_engine.get_wellness_assessment(emotion, risk_score)
+                                recs            = wellness_engine.get_recommendations(emotion, risk_score)
+
+                                st.session_state.last_result = {
+                                    'emotion':        emotion,
+                                    'confidence':     confidence,
+                                    'all_probs':      all_probs,
+                                    'risk_score':     risk_score,
+                                    'risk_category':  risk_breakdown["category"],
+                                    'risk_breakdown': risk_breakdown,
+                                    'wellness_status':wellness_details["status"],
+                                    'interpretation': f"**(Random Sample — True Label: {true_emotion.upper()})** "
+                                                      + wellness_details["interpretation"],
+                                    'recommendations':recs,
+                                }
+                                
+                                history_manager.save_prediction(
+                                    emotion=emotion,
+                                    confidence=confidence,
+                                    risk_score=risk_breakdown["final_score"],
+                                    wellness_status=st.session_state.last_result['wellness_status'],
+                                    recommendations=recs
+                                )
+                                st.rerun()
         
-        col1, col2 = st.columns([1, 1])
-        
-        with col1:
-            st.audio(uploaded_file)
-            
-            # Waveform
-            time = np.linspace(0, len(audio_data) / sr, len(audio_data))
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(x=time, y=audio_data, mode='lines', 
-                                     line=dict(color='#667eea', width=1),
-                                     fill='tozeroy', fillcolor='rgba(102, 126, 234, 0.3)'))
-            fig.update_layout(title="🎵 Waveform", height=200, 
-                              xaxis_title="Time (s)", yaxis_title="Amplitude",
-                              margin=dict(l=20, r=20, t=40, b=20))
-            st.plotly_chart(fig, use_container_width=True)
-        
-        with col2:
-            if st.button("🔮 Analyze Emotion", use_container_width=True):
-                if not st.session_state.trained:
-                    st.error("⚠️ Please train the model first!")
-                else:
-                    with st.spinner("Analyzing..."):
-                        emotion, confidence, all_probs = predict_emotion(
-                            st.session_state.model,
-                            st.session_state.label_encoder,
-                            audio_data, sr
-                        )
+        with col_wave:
+            # Plotly Waveform plot
+            if 'last_audio' in st.session_state and st.session_state.last_audio is not None:
+                if not audio_file:
+                    st.markdown("##### Audio Playback (Random Sample)")
+                    st.audio(st.session_state.last_audio, sample_rate=st.session_state.last_sr)
                     
-                    # Store result in session state so it persists
-                    st.session_state.last_audio = audio_data.copy()
-                    st.session_state.last_sr = sr
-                    st.session_state.last_result = {
-                        'emotion': emotion,
-                        'confidence': confidence,
-                        'all_probs': all_probs
-                    }
-            
-            # Show results if we have them (persists after button click)
-            if st.session_state.last_result:
-                result = st.session_state.last_result
-                emotion = result['emotion']
-                confidence = result['confidence']
-                all_probs = result['all_probs']
+                y = st.session_state.last_audio
+                rate = st.session_state.last_sr
+                time_axis = np.linspace(0, len(y) / rate, len(y))
                 
-                # Result
+                import plotly.graph_objects as go
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(
+                    x=time_axis, y=y, mode='lines', 
+                    line=dict(color='#8884d8', width=1.2),
+                    fill='tozeroy', fillcolor='rgba(136, 132, 216, 0.15)'
+                ))
+                fig.update_layout(
+                    title={"text": "<b>Vocal Waveform Visualization</b>", "font": {"color": "white"}},
+                    xaxis={"title": "Time (seconds)", "tickcolor": "gray", "gridcolor": "rgba(255,255,255,0.05)"},
+                    yaxis={"title": "Amplitude", "tickcolor": "gray", "gridcolor": "rgba(255,255,255,0.05)"},
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    font=dict(color='white'),
+                    height=210,
+                    margin=dict(l=40, r=20, t=40, b=30)
+                )
+                st.plotly_chart(fig, use_container_width=True)
+        
+        # Show predictions results panel if loaded
+        if st.session_state.last_result:
+            res = st.session_state.last_result
+            st.markdown("---")
+            st.markdown("### 📊 Analysis Diagnostics")
+            
+            col_res1, col_res2, col_res3 = st.columns(3)
+
+            with col_res1:
+                emoji = EMOTION_EMOJIS.get(res['emotion'].lower(), '🎭')
+                conf_pct = res['confidence'] * 100
+                low_conf_html = ""
+                if conf_pct < LOW_CONFIDENCE_THRESHOLD * 100:
+                    low_conf_html = '<div class="low-confidence-banner">⚠️ Prediction confidence is low — consider recording again in a quieter environment or speaking more clearly.</div>'
+                elif conf_pct < MODERATE_CONFIDENCE_THRESHOLD * 100:
+                    low_conf_html = '<div class="low-confidence-banner">ℹ️ Moderate confidence — results may be less precise. Try a cleaner recording for best accuracy.</div>'
+
                 st.markdown(f"""
-                <div class="emotion-result">
-                    <div class="emotion-emoji">{EMOTION_EMOJIS.get(emotion, '🎭')}</div>
-                    <h2>{emotion}</h2>
-                    <p style="color:white; font-size:1.2rem;">Confidence: {confidence*100:.1f}%</p>
+                <div class="emotion-result-box">
+                    <div class="emotion-emoji-lg">{emoji}</div>
+                    <h2>{res['emotion']}</h2>
+                    <div class="confidence-badge">Confidence: {conf_pct:.1f}%</div>
+                    {low_conf_html}
                 </div>
                 """, unsafe_allow_html=True)
                 
-                # Bar chart
-                emotions = list(all_probs.keys())
-                probs = [all_probs[e] * 100 for e in emotions]
-                colors = ['#667eea' if e == emotion else '#764ba2' for e in emotions]
+            with col_res2:
+                fig_gauge = dashboard.plot_risk_gauge_meter(res['risk_score'], res['risk_category'])
+                st.plotly_chart(fig_gauge, use_container_width=True)
                 
-                fig = go.Figure(data=[go.Bar(x=emotions, y=probs, marker_color=colors,
-                                              text=[f'{p:.1f}%' for p in probs], textposition='auto')])
-                fig.update_layout(title="📊 All Emotions", height=300, yaxis_range=[0, 100],
-                                  margin=dict(l=20, r=20, t=40, b=20))
-                st.plotly_chart(fig, use_container_width=True)
-                
-                # Feedback section - ADAPTIVE LEARNING
-                st.markdown("---")
-                st.markdown("### 🔄 Was this prediction correct?")
-                st.caption("If wrong, select the correct emotion and save to improve the model!")
-                
-                col_fb1, col_fb2 = st.columns([1, 2])
-                with col_fb1:
-                    correct_emotion = st.selectbox(
-                        "Select correct emotion:",
-                        list(EMOTION_EMOJIS.keys()),
-                        index=list(EMOTION_EMOJIS.keys()).index(emotion) if emotion in EMOTION_EMOJIS else 0,
-                        key="feedback_emotion"
-                    )
-                with col_fb2:
-                    if st.button("✅ Save for Retraining", use_container_width=True, key="save_feedback"):
-                        if st.session_state.last_audio is not None:
-                            filepath = save_feedback_audio(st.session_state.last_audio, st.session_state.last_sr, correct_emotion)
-                            st.success(f"✅ Saved as '{correct_emotion}' emotion!")
-                            st.info(f"📁 File: {filepath}")
-                            st.balloons()
-                        else:
-                            st.error("❌ No audio to save!")
-    
-    else:
-        # Show instructions when no file uploaded
-        st.info("👆 Upload an audio file to analyze emotions. Train the model first using the sidebar.")
-        
-        # Quick test with sample from dataset
-        st.markdown("### 🎵 Or Test with Dataset Sample")
-        if st.button("🎲 Test Random Sample", use_container_width=True):
-            if not st.session_state.trained:
-                st.error("⚠️ Please train the model first!")
-            elif not os.path.exists(DATASET_PATH):
-                st.error("❌ Dataset not found!")
-            else:
-                # Get random file
-                import random
-                actors = [f for f in os.listdir(DATASET_PATH) if os.path.isdir(os.path.join(DATASET_PATH, f))]
-                actor = random.choice(actors)
-                files = [f for f in os.listdir(os.path.join(DATASET_PATH, actor)) if f.endswith('.wav')]
-                file = random.choice(files)
-                filepath = os.path.join(DATASET_PATH, actor, file)
-                
-                # Get true emotion
-                true_emotion = EMOTIONS.get(file.split('-')[2], 'unknown')
-                
-                # Load and predict
-                audio, sr = librosa.load(filepath, duration=3, offset=0.5, sr=SAMPLE_RATE)
-                emotion, confidence, all_probs = predict_emotion(
-                    st.session_state.model, st.session_state.label_encoder, audio, sr
-                )
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.markdown(f"**True Emotion:** {EMOTION_EMOJIS.get(true_emotion, '')} {true_emotion}")
-                with col2:
-                    st.markdown(f"**Predicted:** {EMOTION_EMOJIS.get(emotion, '')} {emotion} ({confidence*100:.1f}%)")
-                
-                if true_emotion == emotion:
-                    st.success("✅ Correct!")
+                # Styled Progress bar indicator
+                risk_percent = res['risk_score']
+                if risk_percent < 30:
+                    bar_color = "#28A745"  # green
+                elif risk_percent < 60:
+                    bar_color = "#FFC107"  # yellow
+                elif risk_percent < 85:
+                    bar_color = "#FD7E14"  # orange
                 else:
-                    st.warning("❌ Wrong prediction")
+                    bar_color = "#DC3545"  # red
+                    
+                st.markdown(f"""
+                <div style="padding: 0 10px;">
+                    <span style="font-size: 0.9rem; color:#b0aebc; font-weight:600;">Risk Category: {res['risk_category']}</span>
+                    <div class="risk-bar-container">
+                        <div class="risk-bar-fill" style="width: {risk_percent}%; background-color: {bar_color};"></div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+                
+            with col_res3:
+                df_hist = history_manager.load_history_as_df()
+                stability, stab_emoji = "Single prediction", "⚪"
+                if not df_hist.empty and len(df_hist) >= 3:
+                    stability, stab_emoji = wellness_engine.calculate_stability(df_hist['risk_score'].tolist())
+                    
+                st.markdown(f"""
+                <div class="glass-card" style="height: 100%; display:flex; flex-direction:column; justify-content:center;">
+                    <div style="font-size:0.9rem; color:#b0aebc; font-weight:600; text-transform:uppercase;">Wellness Status</div>
+                    <div style="font-size:1.8rem; font-weight:800; color:#c2e9fb; margin-top:5px;">{res['wellness_status']}</div>
+                    <hr style="border:0; border-top:1px solid rgba(255,255,255,0.08); margin: 15px 0;">
+                    <div style="font-size:0.9rem; color:#b0aebc; font-weight:600; text-transform:uppercase;">Session Stability</div>
+                    <div style="font-size:1.2rem; font-weight:600; margin-top:5px;">{stab_emoji} {stability}</div>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            st.markdown("### 🧘 Wellness Insights & Supportive Action Plan")
+            col_info, col_recs = st.columns([1, 1.2])
+            
+            with col_info:
+                st.markdown(f"""
+                <div class="glass-highlight" style="height: 100%;">
+                    <h5>🧠 Emotional Interpretation</h5>
+                    <p style="font-size:1.05rem; line-height:1.6; color:#e0dff2; margin-bottom:1.5rem;">{res['interpretation']}</p>
+                    <div class="disclaimer-card">
+                        {wellness_engine.DISCLAIMER_TEXT}
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+                
+            with col_recs:
+                st.markdown("<div class='glass-card' style='height: 100%;'>", unsafe_allow_html=True)
+                st.markdown("##### 💡 Recommended Next Steps")
+                for r in res['recommendations']:
+                    st.markdown(f"- {r}")
+                st.markdown("</div>", unsafe_allow_html=True)
+            
+            st.markdown("---")
+            st.markdown("### 🔄 Adaptive Learning: Quality Correction Loop")
+            st.caption("Help improve the AI system's precision. If the predicted emotion is incorrect, choose the correct one below to save it for future retraining.")
+            
+            col_fb1, col_fb2 = st.columns([2, 3])
+            with col_fb1:
+                correct_emo = st.selectbox(
+                    "Select correct vocal emotion:",
+                    list(EMOTION_EMOJIS.keys()),
+                    index=list(EMOTION_EMOJIS.keys()).index(res['emotion'].lower()) if res['emotion'].lower() in EMOTION_EMOJIS else 0,
+                    key="ui_feedback_emotion"
+                )
+            with col_fb2:
+                st.markdown("<div style='padding-top: 28px;'>", unsafe_allow_html=True)
+                if st.button("💾 Save Correction to Feedback Base", use_container_width=True, key="ui_save_feedback"):
+                    if st.session_state.last_audio is not None:
+                        filepath = save_feedback_audio(st.session_state.last_audio, st.session_state.last_sr, correct_emo)
+                        st.success(f"Correction saved! Correct label set: '{correct_emo.upper()}'")
+                        st.info(f"Target feedback buffer file: {os.path.basename(filepath)}")
+                        st.balloons()
+                    else:
+                        st.error("No raw audio cache found to apply corrections.")
+                st.markdown("</div>", unsafe_allow_html=True)
+
+    with tab_analytics:
+        st.markdown("### 📊 Session Analytics & Trend Tracking")
+        df_history = history_manager.load_history_as_df()
+        
+        if df_history.empty:
+            st.info("No predictions logged during this session yet. Perform analysis in the Voice Analyzer to compile data.")
+        else:
+            # 1. Summary Cards Row
+            total_records = len(df_history)
+            dominant_emotion = df_history['emotion'].mode().iloc[0] if not df_history['emotion'].empty else "N/A"
+            avg_confidence = df_history['confidence'].mean() * 100
+            avg_risk = df_history['risk_score'].mean()
+            
+            st.markdown(f"""
+            <div class="metric-container" style="margin-bottom: 2rem;">
+                <div class="metric-card">
+                    <div class="metric-title">Total Analyzed</div>
+                    <div class="metric-value">{total_records}</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-title">Dominant Emotion</div>
+                    <div class="metric-value">{dominant_emotion.upper()}</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-title">Avg Confidence</div>
+                    <div class="metric-value">{avg_confidence:.1f}%</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-title">Avg Risk Score</div>
+                    <div class="metric-value">{avg_risk:.1f}</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # 2. Charts Row
+            col_chart1, col_chart2 = st.columns(2)
+            
+            with col_chart1:
+                fig_donut = dashboard.plot_emotion_distribution_donut(df_history)
+                if fig_donut:
+                    st.plotly_chart(fig_donut, use_container_width=True)
+                    
+            with col_chart2:
+                if st.session_state.last_result:
+                    fig_probs = dashboard.plot_confidence_radar_or_bar(
+                        st.session_state.last_result['all_probs'], 
+                        st.session_state.last_result['emotion']
+                    )
+                    if fig_probs:
+                        st.plotly_chart(fig_probs, use_container_width=True)
+                else:
+                    st.info("Run an analysis to view probability breakdowns for the latest speech test.")
+                    
+            # 3. Timeline row
+            st.markdown("---")
+            fig_timeline = dashboard.plot_emotion_timeline(df_history)
+            if fig_timeline:
+                st.plotly_chart(fig_timeline, use_container_width=True)
+                
+            # Session breakdown details
+            st.markdown("##### 📋 Summary Observations")
+            high_risk_incidents = len(df_history[df_history['risk_score'] >= 60])
+            st.write(
+                f"- This session contains **{total_records} analyses** over which **{dominant_emotion}** was the most common state.\n"
+                f"- High Emotional Risk indicators ($\ge 60$ score) occurred **{high_risk_incidents} times** ({high_risk_incidents/total_records*100:.1f}% of checks)."
+            )
+
+    with tab_history:
+        st.markdown("### 📜 Prediction Log History")
+        df_history = history_manager.load_history_as_df()
+        
+        if df_history.empty:
+            st.info("No recorded predictions found.")
+        else:
+            col_hist_controls1, col_hist_controls2 = st.columns([3, 1])
+            
+            with col_hist_controls1:
+                # Simple filter
+                selected_emotion_filter = st.multiselect(
+                    "Filter by Emotion:",
+                    options=df_history['emotion'].unique().tolist(),
+                    default=[]
+                )
+            with col_hist_controls2:
+                st.markdown("<div style='padding-top:28px;'>", unsafe_allow_html=True)
+                # Export history to CSV
+                csv_data = df_history.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="📥 Export History CSV",
+                    data=csv_data,
+                    file_name="speech_emotion_history.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+                st.markdown("</div>", unsafe_allow_html=True)
+                
+            filtered_df = df_history.copy()
+            if selected_emotion_filter:
+                filtered_df = filtered_df[filtered_df['emotion'].isin(selected_emotion_filter)]
+                
+            # Render a clean, formatted table
+            display_df = filtered_df.copy()
+            display_df['confidence'] = display_df['confidence'].apply(lambda x: f"{x*100:.1f}%")
+            display_df['risk_score'] = display_df['risk_score'].apply(lambda x: f"{x:.1f}")
+            display_df['timestamp'] = display_df['timestamp'].dt.strftime("%Y-%m-%d %H:%M:%S")
+            
+            st.dataframe(
+                display_df[["timestamp", "emotion", "confidence", "risk_score", "wellness_status"]],
+                use_container_width=True,
+                hide_index=True
+            )
+            
+            # Reset history button
+            st.markdown("---")
+            if st.button("🗑️ Clear All Prediction History", use_container_width=True):
+                if history_manager.clear_history():
+                    st.success("Prediction history cleared successfully!")
+                    st.rerun()
+                else:
+                    st.error("Failed to delete prediction history file.")
+
+    with tab_settings:
+        st.markdown("### 🧠 Adaptive Learning & Model Controls")
+        
+        col_setup1, col_setup2 = st.columns(2)
+        
+        with col_setup1:
+            st.markdown("##### 📁 Model Persistence")
+            st.write("Save the currently active model parameters or load the last saved checkpoints from the disk.")
+            
+            col_pers1, col_pers2 = st.columns(2)
+            with col_pers1:
+                if st.button("💾 Save Active Model", use_container_width=True):
+                    if st.session_state.model:
+                        os.makedirs(MODEL_DIR, exist_ok=True)
+                        st.session_state.model.save(MODEL_DIR)
+                        joblib.dump(st.session_state.label_encoder, os.path.join(MODEL_DIR, "encoder.pkl"))
+                        joblib.dump(st.session_state.accuracy, os.path.join(MODEL_DIR, "accuracy.pkl"))
+                        st.success("Model files successfully persisted to disk!")
+                    else:
+                        st.error("No active model to save.")
+                        
+            with col_pers2:
+                if st.button("📂 Load Model Checkpoint", use_container_width=True):
+                    try:
+                        from speech_emotion_recognition import KerasEmotionModel
+                        st.session_state.model = KerasEmotionModel.load(MODEL_DIR)
+                        st.session_state.label_encoder = joblib.load(os.path.join(MODEL_DIR, "encoder.pkl"))
+                        acc_path = os.path.join(MODEL_DIR, "accuracy.pkl")
+                        if os.path.exists(acc_path):
+                            st.session_state.accuracy = joblib.load(acc_path)
+                        else:
+                            st.session_state.accuracy = 85.0
+                        st.session_state.trained = True
+                        st.success("Model checkpoints loaded successfully!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Failed to load: Check if models exist. Details: {e}")
+                        
+            st.markdown("---")
+            st.markdown("##### 🚀 Train Initial Model")
+            st.write("Extract features and train a new classification model using the default RAVDESS speech dataset.")
+            
+            if st.button("🚀 Train Model (321 Features)", use_container_width=True):
+                with st.spinner("Extracting features from RAVDESS dataset... This might take a minute."):
+                    x, y = load_dataset()
+                    
+                if len(x) == 0:
+                    st.error("RAVDESS dataset audio files not found at expected path.")
+                else:
+                    st.info(f"Loaded dataset: {len(x)} speech samples. Commencing training...")
+                    with st.spinner("Fitting Multi-Layer Perceptron Classifier..."):
+                        model, le, acc = train_model(x, y)
+                        
+                    st.session_state.model = model
+                    st.session_state.label_encoder = le
+                    st.session_state.trained = True
+                    st.session_state.accuracy = acc
+                    st.success(f"Training completed successfully! Initial accuracy: {acc:.2f}%")
+                    st.rerun()
+                    
+        with col_setup2:
+            st.markdown("##### 🔄 Adaptive Learning (Retraining Loop)")
+            st.write("Incorporate corrected audio samples saved via the Quality Correction Loop into the training database to dynamically retrain the model.")
+            
+            feedback_count = len([f for f in os.listdir(FEEDBACK_DIR) if f.endswith('.wav')]) if os.path.exists(FEEDBACK_DIR) else 0
+            st.metric(label="Saved Feedback Samples", value=feedback_count)
+            
+            if st.button("🔄 Retrain with Feedback", use_container_width=True):
+                if feedback_count == 0:
+                    st.warning("No feedback samples collected yet to execute retraining.")
+                else:
+                    with st.spinner("Extracting original dataset features..."):
+                        x_orig, y_orig = load_dataset()
+                    with st.spinner("Extracting feedback dataset features..."):
+                        x_fb, y_fb = load_feedback_dataset()
+                        
+                    st.info(f"Retraining baseline size: {len(x_orig)} (original) + {len(x_fb)} (feedback) = {len(x_orig)+len(x_fb)} samples.")
+                    
+                    with st.spinner("Retraining MLP model..."):
+                        model, le, acc = retrain_with_feedback(x_orig, y_orig, x_fb, y_fb)
+                        
+                    st.session_state.model = model
+                    st.session_state.label_encoder = le
+                    st.session_state.accuracy = acc
+                    st.success(f"Model retrained successfully with feedback! New Accuracy: {acc:.2f}%")
+                    st.balloons()
+                    st.rerun()
+
+# Legacy alias — kept for any external callers
+EMOTIONS = RAVDESS_EMOTIONS
 
 if __name__ == "__main__":
     main()

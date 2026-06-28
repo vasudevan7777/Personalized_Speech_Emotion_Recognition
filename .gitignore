@@ -1,32 +1,57 @@
-# Virtual Environment
+# ── Virtual Environments ─────────────────────────────────────────────────────
 venv/
 env/
 .env/
+.venv/
 
-# Python
+# ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
+*.pdb
 .Python
+*.egg-info/
+dist/
+build/
+.eggs/
 
-# IDE
+# ── Streamlit ─────────────────────────────────────────────────────────────────
+.streamlit/secrets.toml
+
+# ── Trained Models (keep .gitkeep so the folder exists) ──────────────────────
+models/*.pkl
+models/*.joblib
+!models/.gitkeep
+
+# ── Dataset (too large for GitHub) ───────────────────────────────────────────
+dataset/
+
+# ── Recorded / Temporary Audio Files ─────────────────────────────────────────
+*.wav
+*.mp3
+*.ogg
+*.flac
+
+# ── Feedback / User Data ──────────────────────────────────────────────────────
+feedback_data/
+
+# ── Prediction History ────────────────────────────────────────────────────────
+prediction_history.json
+prediction_history.csv
+
+# ── Logs & Temp ───────────────────────────────────────────────────────────────
+*.log
+*.tmp
+*.cache
+
+# ── IDE ───────────────────────────────────────────────────────────────────────
 .vscode/
 .idea/
 *.swp
 *.swo
 
-# OS
+# ── OS ────────────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
-
-# Models (optional - uncomment if you don't want to upload)
-# models/
-
-# Dataset (too large for GitHub)
-dataset/
-
-# Temporary files
-*.log
-*.tmp
-live.wav
+desktop.ini
