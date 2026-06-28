@@ -1,106 +1,113 @@
-# 🎭 Speech Emotion Recognition
+# 🎭 Speech Emotion Recognition & Wellness Dashboard
 
-An AI-powered application that detects emotions from voice/speech using Machine Learning.
-
----
-
-## 📌 Features
-
-- ✅ Detects **8 emotions**: Neutral, Calm, Happy, Sad, Angry, Fearful, Disgust, Surprised
-- ✅ **Web Interface** using Streamlit
-- ✅ **Adaptive Learning** - Model improves from user feedback
-- ✅ **Waveform Visualization** of uploaded audio
-- ✅ **Confidence Scores** for all emotions
+Detect emotions from voice and speech, analyze acoustic features, and provide personalized mental wellness recommendations using Deep Learning.
 
 ---
 
-## 🛠️ Tech Stack
+## 📖 Project Description
 
-| Component | Technology |
-|-----------|------------|
-| Language | Python 3.10+ |
-| ML Model | MLP Classifier (scikit-learn) |
-| Audio Processing | Librosa |
-| Web Framework | Streamlit |
-| Visualization | Plotly |
-| Dataset | RAVDESS (1,441 audio samples) |
+This is an end-to-end Machine Learning and audio digital signal processing (DSP) application designed to analyze spoken voice recordings, identify emotional states, and provide actionable mental wellness coping strategies. 
 
+By analyzing raw audio clips, extracting high-dimensional speech features, and running predictions through a customized deep neural network, the system detects primary emotions with their confidence probabilities. Additionally, it computes acoustic arousal metrics (like RMS energy and pitch variance) to evaluate an emotional risk score, helping users track and monitor mental wellness trends over time.
 
 ---
 
-## 🚀 Installation
+## 💡 Solution Approach
 
-### 1. Clone or Download the project
+Our solution follows a modular speech processing and deep learning pipeline:
 
-### 2. Create Virtual Environment
+1. **Data Preprocessing & Feature Extraction** ([features.py](file:///e:/SER%20PROJECT/features.py)):
+   - Normalizes audio amplitude and trims silent regions to avoid noise bias using [preprocess_audio](file:///e:/SER%20PROJECT/features.py#L10).
+   - Runs audio quality diagnostics via [audio_quality_check](file:///e:/SER%20PROJECT/features.py#L24) (detects low volume, duration, silence, and background noise).
+   - Extracts a robust **549-dimensional** feature vector containing means and standard deviations of MFCCs (40), Chroma (12), Spectral Contrast (7), Zero Crossing Rate (1), RMS Energy (1), and Mel Spectrogram (128).
+2. **Deep Learning Model Training** ([train_model.py](file:///e:/SER%20PROJECT/train_model.py)):
+   - Loads and augments the RAVDESS dataset in parallel using [joblib.Parallel](file:///e:/SER%20PROJECT/train_model.py#L150-L153) across all CPU cores (noise insertion + speed stretching).
+   - Trains a deep Multi-Layer Perceptron (MLP) Classifier using TensorFlow/Keras.
+   - Core Architecture: 512 → 256 → 128 → 64 dense layers with Batch Normalization, Dropout (0.35–0.25), and L2 regularization to prevent overfitting.
+   - Optimizations: EarlyStopping and ReduceLROnPlateau learning rate decay for fast, stable convergence (~8–15 minutes on CPU).
+3. **Core Evaluation & Inference** ([speech_emotion_recognition.py](file:///e:/SER%20PROJECT/speech_emotion_recognition.py)):
+   - Implements the [KerasEmotionModel](file:///e:/SER%20PROJECT/speech_emotion_recognition.py#L112) wrapper along with custom [SimpleStandardScaler](file:///e:/SER%20PROJECT/speech_emotion_recognition.py#L34) and [SimpleLabelEncoder](file:///e:/SER%20PROJECT/speech_emotion_recognition.py#L19).
+   - Sets low (0.45) and moderate (0.60) confidence thresholds to provide visual warnings on uncertain classifications.
+4. **Interactive Dashboard & Wellness Engine** ([app.py](file:///e:/SER%20PROJECT/app.py), [dashboard.py](file:///e:/SER%20PROJECT/dashboard.py), [wellness_engine.py](file:///e:/SER%20PROJECT/wellness_engine.py)):
+   - Provides a glassmorphic Streamlit interface allowing real-time microphone recording or WAV/MP3 uploads.
+   - Calculates emotional risk (0–100) via [calculate_emotional_risk](file:///e:/SER%20PROJECT/wellness_engine.py#L51) by combining prediction confidence with acoustic arousal features.
+   - Offers dynamic coping recommendations based on the detected emotion.
+   - Renders interactive Plotly donut charts and speedometer risk gauges.
+
+---
+
+## 🛠️ Prerequisites & Dependencies
+
+- **Python version**: Python 3.10 or higher.
+- **Dependencies**: Listed in [requirements.txt](file:///e:/SER%20PROJECT/requirements.txt):
+  - `streamlit` (Interactive web UI framework)
+  - `tensorflow` (Deep learning framework for Keras MLP)
+  - `librosa` & `soundfile` & `sounddevice` (Audio analysis, reading, and recording)
+  - `scikit-learn` & `joblib` (Preprocessing, model serialization, and parallel workers)
+  - `plotly` & `matplotlib` & `seaborn` (Data visualizations and dashboards)
+
+---
+
+## 💻 Setup & Usage Instructions
+
+### 1. Environment Setup
+
+Clone the repository and run the following in your terminal:
+
 ```bash
+# Create a virtual environment
 python -m venv venv
-```
 
-### 3. Activate Virtual Environment
-```bash
-# Windows
-venv\Scripts\activate
-
-# Mac/Linux
+# Activate virtual environment
+# On Windows (PowerShell)
+.\venv\Scripts\Activate.ps1
+# On Windows (CMD)
+.\venv\Scripts\activate.bat
+# On macOS/Linux
 source venv/bin/activate
-```
 
-### 4. Install Dependencies
-```bash
+# Install required dependencies
 pip install -r requirements.txt
 ```
 
----
+### 2. Usage — Running the Project
 
-## ▶️ How to Run
+#### Run the Training Pipeline
+To extract features, apply data augmentations, train the MLP model, and save it under the `models/` directory, run:
+```bash
+python train_model.py
+```
 
-### Web App (Streamlit)
+#### Run the Streamlit Dashboard
+To launch the interactive web application, run:
 ```bash
 streamlit run app.py
 ```
-Then open: http://localhost:8501
+*Alternatively, on Windows, you can execute the runner script:*
+```powershell
+.\run.ps1
+```
+Then open: **`http://localhost:8501`** in your browser.
 
-### CLI Version
+#### Running the CLI Version
+For a fast command-line inference utility:
 ```bash
 python speech_emotion_recognition.py
 ```
 
 ---
 
-## 📖 How to Use (Web App)
+## 📈 Model Performance & Results
 
-1. **Train Model** → Click "🚀 Train Model" in sidebar
-2. **Upload Audio** → Drag & drop WAV/MP3 file
-3. **Analyze** → Click "🔮 Analyze Emotion"
-4. **View Results** → See predicted emotion with confidence
+| Metric / Attribute | Value / Details |
+| :--- | :--- |
+| **Model Type** | Multi-Layer Perceptron (MLP) Classifier (Keras) |
+| **Accuracy** | ~65–75% (on test split with feature augmentations) |
+| **Dataset Size** | 1,441 audio samples (expanded via noise/stretch augmentation) |
+| **Emotions Detected** | 8 classes (Neutral, Calm, Happy, Sad, Angry, Fearful, Disgust, Surprised) |
+| **Features Input** | 549 dimensions (mean & standard deviation of audio banks) |
 
-### Adaptive Learning (Optional)
-- If prediction is wrong, select correct emotion
-- Click "Save for Retraining"
-- Click "🔄 Retrain with Feedback" to improve model
-
----
-
-## 📊 Model Performance
-
-| Metric | Value |
-|--------|-------|
-| Accuracy | ~55-70% |
-| Dataset Size | 1,441 samples |
-| Emotions | 8 classes |
-| Features | MFCC, Chroma, Mel, Spectral |
-
----
-
-## 🎵 Dataset Info (RAVDESS)
-
-- **Full Name**: Ryerson Audio-Visual Database of Emotional Speech and Song
-- **Samples**: 1,441 audio files
-- **Actors**: 24 professional actors (12 male, 12 female)
-- **Emotions**: 8 (neutral, calm, happy, sad, angry, fearful, disgust, surprised)
-
-### File Naming Convention
+### RAVDESS File Naming Convention
 ```
 03-01-03-02-01-02-20.wav
 │  │  │  │  │  │  │
@@ -112,27 +119,17 @@ python speech_emotion_recognition.py
 │  └──────────────── Vocal channel (01=speech, 02=song)
 └─────────────────── Modality (03=audio-only)
 ```
-
-**Emotion Codes:**
-- 01 = Neutral
-- 02 = Calm
-- 03 = Happy
-- 04 = Sad
-- 05 = Angry
-- 06 = Fearful
-- 07 = Disgust
-- 08 = Surprised
+*Emotion Codes: 01 = Neutral, 02 = Calm, 03 = Happy, 04 = Sad, 05 = Angry, 06 = Fearful, 07 = Disgust, 08 = Surprised.*
 
 ---
 
-## 🔧 Requirements
+## 🌟 Standout Features (What Makes This Project Special)
 
-```
-streamlit
-numpy<2.0
-librosa
-soundfile
-scikit-learn
-plotly
-joblib
-```
+1. **Adaptive Learning (Feedback Loop)**:
+   Users can correct misclassifications directly from the web interface. These samples are logged and saved into the `feedback_data/` folder, allowing developers to trigger retraining to resolve model edge-cases.
+2. **Explainable Emotional Risk Score**:
+   Rather than a simple class output, the app estimates emotional distress dynamically. It blends prediction probability with acoustic arousal (loudness levels and pitch standard deviation) to output a detailed breakdown of the emotional risk score (0-100).
+3. **Tailored Coping Interventions**:
+   The integrated wellness engine suggests customized mindfulness practices, breathing exercises, or recommendations depending on the state of the user.
+4. **Rich Plotly Visualizations**:
+   Includes dynamic, responsive gauges showing risk score categories (Low, Moderate, High, Extreme) and donut charts representing overall emotion distribution history.
